@@ -8,18 +8,19 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 class Trainer:
-    def __init__(self, model, train_loader, val_loader, device,
-                 lr=1e-3, weight_decay=1e-4):
+    def __init__(self, model, train_loader, val_loader, device, config):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
+        self.config = config
+        train_cfg = config["train"]
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=lr,
-            weight_decay=weight_decay,
+            lr=train_cfg["lr"],
+            weight_decay=train_cfg["weight_decay"],
         )
 
         self.history = {
@@ -93,7 +94,10 @@ class Trainer:
 
         return epoch_loss, epoch_acc
     
-    def fit(self, num_epochs, save_path=None):
+    def fit(self, num_epochs=None, save_path=None):
+        if num_epochs is None:
+            num_epochs = self.config["train"]["num_epochs"]
+            
         best_val_acc = 0.0
 
         for epoch in range(1, num_epochs + 1):

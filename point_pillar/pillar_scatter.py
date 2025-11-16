@@ -36,4 +36,4 @@ class PillarScatter(nn.Module):
                 iy = int(iy.item())
                 bev[b, :, iy, ix] = f
 
-        return bev
+        return bev                                      # (B, C, H, W)

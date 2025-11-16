@@ -17,30 +17,43 @@ from .pillar_scatter import PillarScatter
 from .pillar_simple_backbone import SimplePillarBackbone
 
 class PointPillarsClassifier(nn.Module):
-    def __init__(self, num_classes, device, 
-                 pfn_out_dim=64, backbone_base_channels=32):
+    def __init__(self, config, device):
         super().__init__()
+        self.config = config
         self.device = device
 
+        ds_cfg  = config["dataset"]
+        vox_cfg = config["voxelizer"]
+        pfn_cfg = config["pfn"]
+        bb_cfg  = config["backbone"]
+
+        num_classes = ds_cfg["num_classes"]
+
         self.voxelizer = PillarVoxelizer(
-            x_range=(-1.0, 1.0),
-            y_range=(-1.0, 1.0),
-            z_range=(-1.0, 1.0),
-            pillar_size=(0.1, 0.1),
-            max_pillars=1024,
-            max_points_per_pillar=32,
+            x_range=vox_cfg["x_range"],
+            y_range=vox_cfg["y_range"],
+            z_range=vox_cfg["z_range"],
+            pillar_size=vox_cfg["pillar_size"],
+            max_pillars=vox_cfg["max_pillars"],
+            max_points_per_pillar=vox_cfg["max_points_per_pillar"],
             device=device,
         )
 
-        self.pfn = PillarFeatureNet(in_dim=8, out_dim=pfn_out_dim)
+        self.pfn = PillarFeatureNet(
+            in_dim=pfn_cfg["in_dim"],
+            out_dim=pfn_cfg["out_dim"],
+        )
+
         self.scatter = PillarScatter(
             nx=self.voxelizer.nx,
             ny=self.voxelizer.ny,
         )
+
         self.backbone = SimplePillarBackbone(
-            in_channels=pfn_out_dim,
+            in_channels=pfn_cfg["out_dim"],
             num_classes=num_classes,
-            base_channels=backbone_base_channels,
+            base_channels=bb_cfg["base_channels"],
+            fc1_dim=bb_cfg["fc1_dim"]
         )
 
         self.to(device)
