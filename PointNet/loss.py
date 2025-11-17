@@ -13,5 +13,6 @@ def t_net_regularization_loss(transform_matrix_feature):
     difference = matrix_product - identity_matrix
     difference = difference.reshape(batch_size, transform_dimension * transform_dimension)
 
-    loss = torch.norm(difference, dim=1).mean()
+    loss = torch.norm(difference, p='fro', dim=1)** 2
+    loss = loss.mean()
     return loss

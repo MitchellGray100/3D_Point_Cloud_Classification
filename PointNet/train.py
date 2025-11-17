@@ -104,9 +104,11 @@ def train():
     learning_rate = 0.001
     learning_rate_step_size = 20
     learning_rate_decay_factor = 0.5
+    min_learning_rate = 1e-5
     regularization_weight = 0.001
     dropout_prob = 0.3
     adam_weight_decay = 1e-4
+    augment_training_data = True
 
     if model_name == "ModelNet10":
         model_path = file_path+"ModelNet10/"
@@ -135,7 +137,10 @@ def train():
             need_reload = True
 
     # augment train data
-    train_transform = Compose([augment_train_data.apply_random_y_rotation,augment_train_data.apply_random_jitter])
+    if augment_training_data:
+        train_transform = Compose([augment_train_data.apply_random_y_rotation,augment_train_data.apply_random_jitter])
+    else:
+        train_transform = None
 
     train_dataset = ModelNet(root=model_path, name=model_name, train=True, pre_transform=SamplePoints(1024), force_reload=need_reload, transform=train_transform)
     test_dataset = ModelNet(root=model_path, name=model_name, train=False, pre_transform=SamplePoints(1024), force_reload=need_reload)
@@ -178,7 +183,12 @@ def train():
         # learning rate schedule step
         scheduler.step()
 
-        print(f"train loss: {train_loss}, train accuracy: {train_acc}%, test accuracy: {test_accuracy}%")
+        # have floor for learning rate
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = max(param_group['lr'], min_learning_rate)
+        current_lr = optimizer.param_groups[0]['lr']
+
+        print(f"learning rate: {current_lr:.6f}, train loss: {train_loss}, train accuracy: {train_acc}%, test accuracy: {test_accuracy}%")
 
         # save best model
         if test_accuracy > best_test_accuracy:
