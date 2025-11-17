@@ -160,7 +160,7 @@ def train():
         # learning rate schedule step
         scheduler.step()
 
-        print(f"train loss: {train_loss}, train accuracy: {train_acc}%, Test Acc: {test_accuracy}%")
+        print(f"train loss: {train_loss}, train accuracy: {train_acc}%, test accuracy: {test_accuracy}%")
 
         # save best model
         if test_accuracy > best_test_accuracy:
