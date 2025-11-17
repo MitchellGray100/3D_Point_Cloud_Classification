@@ -5,10 +5,12 @@ import torch.nn.functional as F
 
 from loss import t_net_regularization_loss
 from PointNetClassification import PointNetClassification
+import augment_train_data
 
 from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import SamplePoints
+from torch_geometric.transforms import Compose
 
 import os
 
@@ -30,7 +32,6 @@ def one_epoch(model, loader, optimizer, device, regularization_loss_weight=0.001
     total_loss = 0
     correct_pred_num = 0
     total_samples_num = 0
-
     pbar = tqdm(loader, desc='Training')
     for batch in pbar:
         # points
@@ -98,8 +99,11 @@ def train():
     batch_size = 32
     num_epochs = 50
     learning_rate = 0.001
-    reg_weight = 0.001
+    learning_rate_step_size = 20
+    learning_rate_decay_factor = 0.5
+    regularization_weight = 0.001
     dropout_prob = 0.3
+    adam_weight_decay = 1e-4
 
     if model_name == "ModelNet10":
         model_path = file_path+"ModelNet10/"
@@ -127,7 +131,10 @@ def train():
         except:
             need_reload = True
 
-    train_dataset = ModelNet(root=model_path, name=model_name, train=True, pre_transform=SamplePoints(1024), force_reload=need_reload)
+    # augment train data
+    train_transform = Compose([augment_train_data.apply_random_y_rotation,augment_train_data.apply_random_jitter])
+
+    train_dataset = ModelNet(root=model_path, name=model_name, train=True, pre_transform=SamplePoints(1024), force_reload=need_reload, transform=train_transform)
     test_dataset = ModelNet(root=model_path, name=model_name, train=False, pre_transform=SamplePoints(1024), force_reload=need_reload)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
@@ -143,8 +150,8 @@ def train():
     model = model.to(device)
 
     # optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=adam_weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=learning_rate_step_size, gamma=learning_rate_decay_factor)
 
     # training loop
     best_test_accuracy = 0
@@ -152,7 +159,7 @@ def train():
         print(f'\nEpoch {epoch}/{num_epochs}')
 
         # train
-        train_loss, train_acc = one_epoch(model, train_loader, optimizer, device, reg_weight)
+        train_loss, train_acc = one_epoch(model, train_loader, optimizer, device, regularization_weight)
 
         # evaluate
         test_accuracy = evaluate(model, test_loader, device)
