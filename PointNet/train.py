@@ -25,6 +25,7 @@ except ImportError:
 def plot_curves(train_losses, test_losses, train_accuracies, test_accuracies, config_name, out_dir="plots"):
     os.makedirs(out_dir, exist_ok=True)
     epochs = list(range(1, len(train_losses) + 1))
+    wrapped_config_name = config_name.replace("_reg", "_\nreg")
 
     # loss
     plt.figure()
@@ -32,7 +33,7 @@ def plot_curves(train_losses, test_losses, train_accuracies, test_accuracies, co
     plt.plot(epochs, test_losses, label="test loss")
     plt.xlabel("epoch")
     plt.ylabel("loss")
-    plt.title(f"loss vs epoch\n({config_name})")
+    plt.title(f"loss vs epoch\n({wrapped_config_name})")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -45,14 +46,19 @@ def plot_curves(train_losses, test_losses, train_accuracies, test_accuracies, co
     plt.plot(epochs, test_accuracies, label="test accuracy")
     plt.xlabel("epoch")
     plt.ylabel("accuracy percent")
-    plt.title(f"accuracy vs epoch\n({config_name})")
+    plt.title(f"accuracy vs epoch\n({wrapped_config_name})")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f"accuracy_{config_name}.png"))
     plt.close()
 
-def log_result(config_name, model_name, batch_size, num_epochs, learning_rate, learning_rate_step_size, learning_rate_decay_factor, min_learning_rate, regularization_weight, dropout_prob, adam_weight_decay, augment_training_data, num_points, best_test_accuracy, path="results.csv"):
+def log_result(config_name, model_name, batch_size, num_epochs, learning_rate, learning_rate_step_size, learning_rate_decay_factor, min_learning_rate, regularization_weight, dropout_prob, adam_weight_decay, augment_training_data, num_points, best_test_accuracy, path="log/results.csv"):
+
+    directory = os.path.dirname(path)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+
     header = (
         "config_name,"
         "model_name,"
@@ -184,7 +190,7 @@ def evaluate(model, loader, device):
 def train(
     model_name = "ModelNet10",  # ModelNet10 or ModelNet40
     batch_size = 32,
-    num_epochs = 200, # 250
+    num_epochs = 250, # 250
     learning_rate = 0.001, # 0.01, 0.001
     learning_rate_step_size = 20,
     learning_rate_decay_factor = 0.7,
@@ -206,7 +212,7 @@ def train(
     # # params!
     # model_name = "ModelNet10"  # ModelNet10 or ModelNet40
     # batch_size = 32
-    # num_epochs = 200 # 250
+    # num_epochs = 250 # 250
     # learning_rate = 0.001 # 0.01, 0.001
     # learning_rate_step_size = 20
     # learning_rate_decay_factor = 0.7
