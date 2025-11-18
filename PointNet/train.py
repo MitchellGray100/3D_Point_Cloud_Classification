@@ -13,8 +13,14 @@ from torch_geometric.transforms import SamplePoints
 from torch_geometric.transforms import Compose
 
 import os
-
 import matplotlib.pyplot as plt
+
+# detect colab
+try:
+    import google.colab  # type: ignore
+    is_colab = True
+except ImportError:
+    is_colab = False
 
 def plot_curves(train_losses, train_accuracies, test_accuracies, config_name, out_dir="plots"):
     os.makedirs(out_dir, exist_ok=True)
@@ -97,6 +103,16 @@ def get_batch(batch, device):
 def count_correct(pred, labels):
     return (pred == labels).sum().item()
 
+def normalize_unit_sphere(data):
+    pos = data.pos
+    point_centroid = pos.mean(dim=0, keepdim=True)
+    pos = pos - point_centroid
+    distances = torch.sqrt((pos ** 2).sum(dim=1))
+    max_distance = distances.max()
+    pos = pos/max_distance
+    data.pos = pos
+    return data
+
 def one_epoch(model, loader, optimizer, device, regularization_loss_weight=0.001):
 
     model.train()
@@ -158,27 +174,25 @@ def evaluate(model, loader, device):
     accuracy = (correct_pred_num / total_samples_num) * 100
     return accuracy
 
-def set_batch_norm_momentum(model, new_momentum):
-    for module in model.modules():
-        if isinstance(module, nn.BatchNorm1d):
-            module.momentum = new_momentum
-
 def train():
     model_path = None
     number_of_classes = 0
 
-    file_path = '../../data/'
+    default_local_root = "../../data/"
+    default_colab_root = "/content/data/"
+    file_path = os.environ.get("MODELNET_ROOT", default_colab_root if is_colab else default_local_root)
+
     # params!
     model_name = "ModelNet10"  # ModelNet10 or ModelNet40
     batch_size = 32
-    num_epochs = 200
-    learning_rate = 0.001
+    num_epochs = 5 # 250
+    learning_rate = 0.001 # 0.01, 0.001
     learning_rate_step_size = 20
-    learning_rate_decay_factor = 0.5
-    min_learning_rate = 1e-5
+    learning_rate_decay_factor = 0.7
+    min_learning_rate = 0
     regularization_weight = 0.001
     dropout_prob = 0.3
-    adam_weight_decay = 1e-4
+    adam_weight_decay = 0 # 0, 1e-4
     augment_training_data = True
     num_points = 1024 # sample points from models
 
@@ -189,12 +203,12 @@ def train():
     )
 
     if model_name == "ModelNet10":
-        model_path = file_path+"ModelNet10/"
-        model_name = "10"
+        model_path = os.path.join(file_path, "ModelNet10")
+        model_name_short = "10"
         number_of_classes = 10
     elif model_name == "ModelNet40":
-        model_path = file_path+"ModelNet40/"
-        model_name = "40"
+        model_path = os.path.join(file_path, "ModelNet40")
+        model_name_short = "40"
         number_of_classes = 40
 
     os.makedirs('model', exist_ok=True)
@@ -202,33 +216,51 @@ def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
 
-    processed_dir = os.path.join(model_path, 'processed')
-    need_reload = False
-    if os.path.exists(processed_dir):
-        try:
-            temp_dataset = ModelNet(root=model_path, name=model_name, train=True)
-            current_points = temp_dataset[0].pos.shape[0]
-            if current_points != num_points:
-                need_reload = True
-        except:
-            need_reload = True
-
-    # augment train data
     if augment_training_data:
-        train_transform = Compose([augment_train_data.apply_random_y_rotation,augment_train_data.apply_random_jitter])
+        train_transform = Compose([
+            SamplePoints(num_points),
+            normalize_unit_sphere,
+            augment_train_data.apply_random_y_rotation,
+            augment_train_data.apply_random_jitter,
+        ])
     else:
-        train_transform = None
+        train_transform = Compose([
+            SamplePoints(num_points),
+            normalize_unit_sphere,
+        ])
 
-    train_dataset = ModelNet(root=model_path, name=model_name, train=True, pre_transform=SamplePoints(1024), force_reload=need_reload, transform=train_transform)
-    test_dataset = ModelNet(root=model_path, name=model_name, train=False, pre_transform=SamplePoints(1024), force_reload=need_reload)
+    test_transform = Compose([
+        SamplePoints(num_points),
+        normalize_unit_sphere,
+    ])
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    will_force_reload = False
+
+    train_dataset = ModelNet(
+        root=model_path,
+        name=model_name_short,
+        train=True,
+        pre_transform=None,
+        force_reload=will_force_reload,
+        transform=train_transform,
+    )
+
+    test_dataset = ModelNet(
+        root=model_path,
+        name=model_name_short,
+        train=False,
+        pre_transform=None,
+        force_reload=will_force_reload,
+        transform=test_transform,
+    )
+
+    num_workers = 2 if is_colab else 4
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     print(f"number of classes {train_dataset.num_classes}")
     print(f"train n samples: {len(train_dataset)}")
     print(f"test n samples: {len(test_dataset)}")
-
 
     # PointNetClassification
     model = PointNetClassification(num_classes=number_of_classes, dropout_probability=dropout_prob)
@@ -239,20 +271,12 @@ def train():
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=learning_rate_step_size, gamma=learning_rate_decay_factor)
 
     # training loop
-    batch_norm_momentum_decay_start = 0.5
-    batch_norm_momentum_decay_end = 0.99
     best_test_accuracy = 0
     train_losses = []
     train_accuracies = []
     test_accuracies = []
     for epoch in range(1, num_epochs + 1):
         print(f'\nEpoch {epoch}/{num_epochs}')
-
-        # change batch norm momentum
-        percent_epoch = (epoch - 1) / (num_epochs - 1)
-        decay = batch_norm_momentum_decay_start + ((batch_norm_momentum_decay_end-batch_norm_momentum_decay_start)*percent_epoch)
-        new_momentum = 1 - decay
-        set_batch_norm_momentum(model, new_momentum)
 
         # train
         train_loss, train_accuracy = one_epoch(model, train_loader, optimizer, device, regularization_weight)
@@ -275,11 +299,11 @@ def train():
         train_accuracies.append(train_accuracy)
         test_accuracies.append(test_accuracy)
 
-        # save best model
-        if test_accuracy > best_test_accuracy:
-            best_test_accuracy = test_accuracy
-            torch.save(model.state_dict(), 'model/pointnet_model.pth')
-            print(f"save model test accuracy: {best_test_accuracy:}%)")
+        # # save best model
+        # if test_accuracy > best_test_accuracy:
+        #     best_test_accuracy = test_accuracy
+        #     torch.save(model.state_dict(), 'model/pointnet_model.pth')
+        #     print(f"save model test accuracy: {best_test_accuracy}%)")
 
     print(f"best test accuracy {best_test_accuracy}%")
     plot_curves(train_losses, train_accuracies, test_accuracies, config_name)
