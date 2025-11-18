@@ -22,7 +22,7 @@ class SimplePillarBackbone(nn.Module):
     Output:
         logits: (B, num_classes)
     """
-    def __init__(self, in_channels: int, num_classes: int, base_channels: int = 32):
+    def __init__(self, in_channels: int, num_classes: int, base_channels: int = 32, fc1_dim: int = 256):
         super().__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -40,8 +40,8 @@ class SimplePillarBackbone(nn.Module):
         self.bn3   = nn.BatchNorm2d(base_channels * 4)
 
         # Global average pooling → (B, C_base*4) -> (B, num_classes)
-        self.fc1   = nn.Linear(base_channels * 4, 256)
-        self.fc2   = nn.Linear(256, num_classes)
+        self.fc1   = nn.Linear(base_channels * 4, fc1_dim)
+        self.fc2   = nn.Linear(fc1_dim, num_classes)
 
     def forward(self, x):
         """
