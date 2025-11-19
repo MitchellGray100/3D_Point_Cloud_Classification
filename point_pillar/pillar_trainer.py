@@ -2,6 +2,10 @@
 # Author: Yonghao Li (Paul)
 # The training that run the training loop and get the loss/accuracy for reports
 
+import os          
+import json        
+import csv         
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -94,10 +98,11 @@ class Trainer:
 
         return epoch_loss, epoch_acc
     
-    def fit(self, num_epochs=None, save_path=None):
+    def fit(self, num_epochs=None, save_path=None,
+            artifacts_dir=None, run_name="modelnet10_pointpillars"):
         if num_epochs is None:
             num_epochs = self.config["train"]["num_epochs"]
-            
+
         best_val_acc = 0.0
 
         for epoch in range(1, num_epochs + 1):
@@ -108,6 +113,10 @@ class Trainer:
                 best_val_acc = val_acc
                 torch.save(self.model.state_dict(), save_path)
                 print(f"  [*] Saved new best model (val_acc={val_acc:.4f})")
+
+        # automatically dump plots + CSV + JSON summary
+        if artifacts_dir is not None:
+            self.save_curves_and_config(artifacts_dir, run_name)
 
 
     def plot_history(self, save_path=None):
@@ -142,3 +151,86 @@ class Trainer:
             plt.savefig(f"{save_path}_acc.png", dpi=300, bbox_inches="tight")
 
         plt.show()
+
+    def save_curves_and_config(self, output_dir: str, run_name: str = "modelnet10_pointpillars"):
+        """
+        Save:
+          - loss/accuracy curves as PNG
+          - history (per-epoch metrics) as CSV
+          - config + history as JSON
+
+        Files are prefixed by `run_name` inside `output_dir`.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        prefix = os.path.join(output_dir, run_name)
+
+        epochs = list(range(1, len(self.history["train_loss"]) + 1))
+
+        # loss
+        plt.figure(figsize=(8, 5))
+        plt.plot(epochs, self.history["train_loss"], label="Train Loss")
+        plt.plot(epochs, self.history["val_loss"], label="Val Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Loss Curve")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        loss_fig_path = f"{prefix}_loss.png"
+        plt.savefig(loss_fig_path, dpi=300)
+        plt.close()
+
+        # accuracy
+        plt.figure(figsize=(8, 5))
+        plt.plot(epochs, self.history["train_acc"], label="Train Acc")
+        plt.plot(epochs, self.history["val_acc"], label="Val Acc")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy")
+        plt.title("Accuracy Curve")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        acc_fig_path = f"{prefix}_acc.png"
+        plt.savefig(acc_fig_path, dpi=300)
+        plt.close()
+
+        # csv
+        csv_path = f"{prefix}_history.csv"
+        with open(csv_path, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "train_loss", "val_loss", "train_acc", "val_acc"])
+            for i, epoch in enumerate(epochs):
+                writer.writerow([
+                    epoch,
+                    self.history["train_loss"][i],
+                    self.history["val_loss"][i],
+                    self.history["train_acc"][i],
+                    self.history["val_acc"][i],
+                ])
+
+        # json
+        summary = {
+            "config": self.config,
+            "history": {
+                "epochs": epochs,
+                "train_loss": self.history["train_loss"],
+                "val_loss": self.history["val_loss"],
+                "train_acc": self.history["train_acc"],
+                "val_acc": self.history["val_acc"],
+            },
+            "artifacts": {
+                "loss_figure": loss_fig_path,
+                "acc_figure": acc_fig_path,
+                "history_csv": csv_path,
+            },
+        }
+
+        json_path = f"{prefix}_summary.json"
+        with open(json_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        print("[Trainer] Saved curves and config to:")
+        print(f"  {loss_fig_path}")
+        print(f"  {acc_fig_path}")
+        print(f"  {csv_path}")
+        print(f"  {json_path}")
