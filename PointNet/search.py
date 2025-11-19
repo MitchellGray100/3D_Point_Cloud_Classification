@@ -17,42 +17,55 @@ csv_field_names = [
     "learning_rate_step_size",
     "learning_rate_decay_factor",
     "min_learning_rate",
-    "regularization_weight",
+    "regularization_loss_weight",
     "dropout_prob",
     "adam_weight_decay",
     "augment_training_data",
     "num_points",
+    "batch_norm_init_decay",
+    "batch_norm_decay_rate",
+    "batch_norm_decay_step",
+    "batch_norm_decay_clip",
 ]
 
 default_param_grid = {
-    "model_name": ["ModelNet10"],
+    "model_name": ["ModelNet40"],
     "batch_size": [32],
     "num_epochs": [250],
     "learning_rate": [0.001],
     "learning_rate_step_size": [20],
     "learning_rate_decay_factor": [0.7],
     "min_learning_rate": [0],
-    "regularization_weight": [0.001],
+    "regularization_loss_weight": [0.001],
     "dropout_prob": [0.3],
     "adam_weight_decay": [0.0],
     "augment_training_data": [True],
     "num_points": [1024],
+    "batch_norm_init_decay": [0.5],
+    "batch_norm_decay_rate": [0.5],
+    "batch_norm_decay_step": [200000],
+    "batch_norm_decay_clip": [0.99],
 }
 
 param_grid = {
-    "model_name": ["ModelNet10"],
+    "model_name": ["ModelNet40"],
     "batch_size": [16, 32, 64],
     "num_epochs": [250],
     "learning_rate": [0.01, 0.001, 0.0001],
     "learning_rate_step_size": [20],
     "learning_rate_decay_factor": [0.7],
     "min_learning_rate": [0],
-    "regularization_weight": [0.001],
+    "regularization_loss_weight": [0.001],
     "dropout_prob": [0, 0.3, 0.6],
     "adam_weight_decay": [0.0],
     "augment_training_data": [True],
     "num_points": [1024],
+    "batch_norm_init_decay": [0.5],
+    "batch_norm_decay_rate": [0.5],
+    "batch_norm_decay_step": [200000],
+    "batch_norm_decay_clip": [0.99],
 }
+
 
 def read_completed_configs(path=search_log_path):
     if not os.path.exists(path):
@@ -66,6 +79,7 @@ def read_completed_configs(path=search_log_path):
             completed_set.add(config_key)
     return completed_set
 
+
 def config_to_hashkey(config):
     return (
         str(config["model_name"]),
@@ -75,12 +89,17 @@ def config_to_hashkey(config):
         int(config["learning_rate_step_size"]),
         float(config["learning_rate_decay_factor"]),
         float(config["min_learning_rate"]),
-        float(config["regularization_weight"]),
+        float(config["regularization_loss_weight"]),
         float(config["dropout_prob"]),
         float(config["adam_weight_decay"]),
         int(config["augment_training_data"]),
         int(config["num_points"]),
+        float(config["batch_norm_init_decay"]),
+        float(config["batch_norm_decay_rate"]),
+        int(config["batch_norm_decay_step"]),
+        float(config["batch_norm_decay_clip"]),
     )
+
 
 def log_config(config, path=search_log_path):
     os.makedirs(log_dir, exist_ok=True)
@@ -94,11 +113,15 @@ def log_config(config, path=search_log_path):
         "learning_rate_step_size": int(config["learning_rate_step_size"]),
         "learning_rate_decay_factor": float(config["learning_rate_decay_factor"]),
         "min_learning_rate": float(config["min_learning_rate"]),
-        "regularization_weight": float(config["regularization_weight"]),
+        "regularization_loss_weight": float(config["regularization_loss_weight"]),
         "dropout_prob": float(config["dropout_prob"]),
         "adam_weight_decay": float(config["adam_weight_decay"]),
         "augment_training_data": int(config["augment_training_data"]),
         "num_points": int(config["num_points"]),
+        "batch_norm_init_decay": float(config["batch_norm_init_decay"]),
+        "batch_norm_decay_rate": float(config["batch_norm_decay_rate"]),
+        "batch_norm_decay_step": int(config["batch_norm_decay_step"]),
+        "batch_norm_decay_clip": float(config["batch_norm_decay_clip"]),
     }
 
     with open(path, "a", newline="") as file:
@@ -106,6 +129,7 @@ def log_config(config, path=search_log_path):
         if not file_exists:
             csv_writer.writeheader()
         csv_writer.writerow(row)
+
 
 def make_grid_config_list():
     param_names = list(param_grid.keys())
@@ -115,6 +139,7 @@ def make_grid_config_list():
         config_list.append(config)
     return config_list
 
+
 def make_random_config_list(num_trials):
     config_list = []
     for _ in range(num_trials):
@@ -123,6 +148,7 @@ def make_random_config_list(num_trials):
             config[param_name] = random.choice(param_values)
         config_list.append(config)
     return config_list
+
 
 def make_single_param_sweep_config_list(default_param_grid, param_grid, include_default_config=True):
     config_list = []
@@ -147,6 +173,7 @@ def make_single_param_sweep_config_list(default_param_grid, param_grid, include_
 
     return config_list
 
+
 def run_config_list(config_list):
     completed_set = read_completed_configs()
 
@@ -159,7 +186,7 @@ def run_config_list(config_list):
 
         print("\n" + "-" * 69)
         print("running config:")
-        for param_name, param_value in config.items():
+        for param_name, param_value in sorted(config.items()):
             print(f"    {param_name:33} = {param_value}")
 
         start_time_seconds = time.time()
@@ -172,14 +199,17 @@ def run_config_list(config_list):
         log_config(config)
         completed_set.add(config_key)
 
+
 def grid_search():
     config_list = make_grid_config_list()
     run_config_list(config_list)
 
-def random_search(num_trials=20):
+
+def random_search(num_trials=10):
     config_list = make_random_config_list(num_trials)
     run_config_list(config_list)
-    
+
+
 def single_param_sweep_search():
     config_list = make_single_param_sweep_config_list(
         default_param_grid=default_param_grid,
@@ -188,8 +218,8 @@ def single_param_sweep_search():
     )
     run_config_list(config_list)
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
+    single_param_sweep_search()
     # grid_search()
     # random_search(num_trials=10)
-    single_param_sweep_search()

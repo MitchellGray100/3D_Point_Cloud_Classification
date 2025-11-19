@@ -25,7 +25,7 @@ except ImportError:
 def plot_curves(train_losses, test_losses, train_accuracies, test_accuracies, config_name, out_dir="plots"):
     os.makedirs(out_dir, exist_ok=True)
     epochs = list(range(1, len(train_losses) + 1))
-    wrapped_config_name = config_name.replace("_reg", "_\nreg")
+    wrapped_config_name = config_name.replace("_aug", "_\naug")
 
     # loss
     plt.figure()
@@ -53,7 +53,9 @@ def plot_curves(train_losses, test_losses, train_accuracies, test_accuracies, co
     plt.savefig(os.path.join(out_dir, f"accuracy_{config_name}.png"))
     plt.close()
 
-def log_result(config_name, model_name, batch_size, num_epochs, learning_rate, learning_rate_step_size, learning_rate_decay_factor, min_learning_rate, regularization_weight, dropout_prob, adam_weight_decay, augment_training_data, num_points, best_test_accuracy, path="log/results.csv"):
+def log_result(config_name, model_name, batch_size, num_epochs, learning_rate, learning_rate_step_size, learning_rate_decay_factor, min_learning_rate, regularization_loss_weight, dropout_prob, adam_weight_decay, augment_training_data, num_points,
+               batch_norm_init_decay, batch_norm_decay_rate, batch_norm_decay_step, batch_norm_decay_clip, best_test_accuracy,
+               path="log/results.csv"):
 
     directory = os.path.dirname(path)
     if directory and not os.path.exists(directory):
@@ -68,11 +70,15 @@ def log_result(config_name, model_name, batch_size, num_epochs, learning_rate, l
         "learning_rate_step_size,"
         "learning_rate_decay_factor,"
         "min_learning_rate,"
-        "regularization_weight,"
+        "regularization_loss_weight,"
         "dropout_prob,"
         "adam_weight_decay,"
         "augment_training_data,"
         "num_points,"
+        "batch_norm_init_decay,"
+        "batch_norm_decay_rate,"
+        "batch_norm_decay_step,"
+        "batch_norm_decay_clip,"
         "best_test_accuracy\n"
     )
 
@@ -90,13 +96,18 @@ def log_result(config_name, model_name, batch_size, num_epochs, learning_rate, l
             f"{learning_rate_step_size},"
             f"{learning_rate_decay_factor},"
             f"{min_learning_rate},"
-            f"{regularization_weight},"
+            f"{regularization_loss_weight},"
             f"{dropout_prob},"
             f"{adam_weight_decay},"
             f"{int(augment_training_data)},"
             f"{num_points},"
+            f"{batch_norm_init_decay},"
+            f"{batch_norm_decay_rate},"
+            f"{batch_norm_decay_step},"
+            f"{batch_norm_decay_clip},"
             f"{best_test_accuracy}\n"
         )
+
 
 def get_batch(batch, device):
 
@@ -110,6 +121,14 @@ def get_batch(batch, device):
 def count_correct(pred, labels):
     return (pred == labels).sum().item()
 
+def get_batch_norm_momentum(step_index, batch_size, init_decay, decay_rate, decay_step, decay_clip):
+    global_step = step_index * batch_size
+    step_ratio = float(global_step)/float(decay_step)
+    batch_norm_momentum_deduction = init_decay * (decay_rate**step_ratio)
+    batch_norm_decay_tf = min(decay_clip, 1.0 - batch_norm_momentum_deduction)
+    momentum_pt = 1.0 - batch_norm_decay_tf
+    return momentum_pt
+
 def normalize_unit_sphere(data):
     pos = data.pos
     point_centroid = pos.mean(dim=0, keepdim=True)
@@ -120,14 +139,23 @@ def normalize_unit_sphere(data):
     data.pos = pos
     return data
 
-def one_epoch(model, loader, optimizer, device, regularization_loss_weight=0.001):
+def train_one_epoch(model, loader, optimizer, device, regularization_loss_weight=0.001,
+                    global_step_count=0, batch_size=32, batch_norm_init_decay=0.5, batch_norm_decay_rate=0.5, batch_norm_decay_step=200000, batch_norm_decay_clip=0.99):
 
     model.train()
     total_loss = 0
     correct_pred_num = 0
     total_samples_num = 0
+    step_index = global_step_count
+
     pbar = tqdm(loader, desc='Training')
     for batch in pbar:
+
+        batch_norm_momentum = get_batch_norm_momentum(step_index, batch_size, batch_norm_init_decay, batch_norm_decay_rate, batch_norm_decay_step, batch_norm_decay_clip)
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm1d):
+                module.momentum = batch_norm_momentum
+
         # points
         points, labels = get_batch(batch, device)
 
@@ -158,12 +186,14 @@ def one_epoch(model, loader, optimizer, device, regularization_loss_weight=0.001
         pbar.set_postfix({'loss': loss.item(),
                           'accuracy': (correct_pred_num / total_samples_num) * 100})
 
-    average_loss = total_loss / len(loader)
-    average_accuracy = 100. * correct_pred_num / total_samples_num
+        step_index += 1
 
-    return average_loss, average_accuracy
+    average_loss = total_loss/len(loader)
+    average_accuracy = 100 * correct_pred_num/total_samples_num
 
-def evaluate(model, loader, device):
+    return average_loss, average_accuracy, step_index
+
+def evaluate_one_epoch(model, loader, device):
     model.eval()
     correct_pred_num = 0
     total_samples_num = 0
@@ -188,18 +218,22 @@ def evaluate(model, loader, device):
     return avg_loss, accuracy
 
 def train(
-    model_name = "ModelNet10",  # ModelNet10 or ModelNet40
+    model_name = "ModelNet40",  # ModelNet10 or ModelNet40
     batch_size = 32,
     num_epochs = 250, # 250
     learning_rate = 0.001, # 0.01, 0.001
     learning_rate_step_size = 20,
     learning_rate_decay_factor = 0.7,
     min_learning_rate = 0,
-    regularization_weight = 0.001,
+    regularization_loss_weight = 0.001,
     dropout_prob = 0.3,
     adam_weight_decay = 0 ,# 0, 1e-4
     augment_training_data = True,
-    num_points = 1024 # sample points from models
+    num_points = 1024, # sample points from 3d models
+    batch_norm_init_decay = 0.5,
+    batch_norm_decay_rate = 0.5,
+    batch_norm_decay_step = 200000,
+    batch_norm_decay_clip = 0.99,
 ):
 
     model_path = None
@@ -210,18 +244,22 @@ def train(
     file_path = os.environ.get("MODELNET_ROOT", default_colab_root if is_colab else default_local_root)
 
     # # params!
-    # model_name = "ModelNet10"  # ModelNet10 or ModelNet40
+    # model_name = "ModelNet40"  # ModelNet10 or ModelNet40
     # batch_size = 32
     # num_epochs = 250 # 250
     # learning_rate = 0.001 # 0.01, 0.001
     # learning_rate_step_size = 20
     # learning_rate_decay_factor = 0.7
     # min_learning_rate = 0
-    # regularization_weight = 0.001
+    # regularization_loss_weight = 0.001
     # dropout_prob = 0.3
     # adam_weight_decay = 0 # 0, 1e-4
     # augment_training_data = True
     # num_points = 1024 # sample points from models
+    # batch_norm_init_decay = 0.5
+    # batch_norm_decay_rate = 0.5
+    # batch_norm_decay_step = 200000
+    # batch_norm_decay_clip = 0.99
 
     # reload data all the time
     will_force_reload = False
@@ -230,9 +268,13 @@ def train(
         f"{model_name}_bs{batch_size}_ep{num_epochs}"
         f"_lr{learning_rate}_schedS{learning_rate_step_size}"
         f"_schedD{learning_rate_decay_factor}"
-        f"_reg{regularization_weight}_drop{dropout_prob}"
+        f"_reg{regularization_loss_weight}_drop{dropout_prob}"
         f"_wd{adam_weight_decay}"
         f"_aug{int(augment_training_data)}_pts{num_points}"
+        f"_bnID{batch_norm_init_decay}"
+        f"_bnDR{batch_norm_decay_rate}"
+        f"_bnDS{batch_norm_decay_step}"
+        f"_bnDC{batch_norm_decay_clip}"
     )
 
     if model_name == "ModelNet10":
@@ -285,7 +327,7 @@ def train(
         transform=test_transform,
     )
 
-    num_workers = 2 if is_colab else 4
+    num_workers = 4
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
@@ -307,14 +349,17 @@ def train(
     train_accuracies = []
     test_accuracies = []
     test_losses = []
+    global_step_count = 0
+
     for epoch in range(1, num_epochs + 1):
         print(f'\nEpoch {epoch}/{num_epochs}')
 
         # train
-        train_loss, train_accuracy = one_epoch(model, train_loader, optimizer, device, regularization_weight)
+        train_loss, train_accuracy, global_step_count = train_one_epoch(model, train_loader, optimizer, device, regularization_loss_weight,
+                                                                        global_step_count=global_step_count, batch_size=batch_size, batch_norm_init_decay=batch_norm_init_decay, batch_norm_decay_rate=batch_norm_decay_rate, batch_norm_decay_step=batch_norm_decay_step, batch_norm_decay_clip=batch_norm_decay_clip)
 
         # evaluate
-        test_loss, test_accuracy = evaluate(model, test_loader, device)
+        test_loss, test_accuracy = evaluate_one_epoch(model, test_loader, device)
 
 
         # learning rate schedule step
@@ -341,7 +386,7 @@ def train(
 
     print(f"best test accuracy {best_test_accuracy}%")
     plot_curves(train_losses, test_losses, train_accuracies, test_accuracies, config_name)
-    log_result(config_name=config_name, model_name=model_name, batch_size=batch_size, num_epochs=num_epochs, learning_rate=learning_rate, learning_rate_step_size=learning_rate_step_size, learning_rate_decay_factor=learning_rate_decay_factor, min_learning_rate=min_learning_rate, regularization_weight=regularization_weight, dropout_prob=dropout_prob, adam_weight_decay=adam_weight_decay, augment_training_data=augment_training_data, num_points=num_points, best_test_accuracy=best_test_accuracy)
+    log_result(config_name=config_name, model_name=model_name, batch_size=batch_size, num_epochs=num_epochs, learning_rate=learning_rate, learning_rate_step_size=learning_rate_step_size, learning_rate_decay_factor=learning_rate_decay_factor, min_learning_rate=min_learning_rate, regularization_loss_weight=regularization_loss_weight, dropout_prob=dropout_prob, adam_weight_decay=adam_weight_decay, augment_training_data=augment_training_data, num_points=num_points, batch_norm_init_decay=batch_norm_init_decay, batch_norm_decay_rate=batch_norm_decay_rate, batch_norm_decay_step=batch_norm_decay_step, batch_norm_decay_clip=batch_norm_decay_clip, best_test_accuracy=best_test_accuracy)
 
 if __name__ == '__main__':
     train()
