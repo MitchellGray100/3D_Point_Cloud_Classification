@@ -46,6 +46,9 @@ set_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # %%
+print(config)
+
+# %%
 DATA_DIR = "./data" + "/" + config["dataset"]["name"]
 PREDATA_DIR = "./data" + "/" + config["dataset"]["name"] + "_precomputed_" + str(config["dataset"]["num_points"])
 # 1. build datasets / loaders using config
@@ -68,10 +71,10 @@ val_dataset = ModelNetDataset(
 )
 
 # %%
-for i in range(len(train_dataset)):
-    _ = train_dataset[i]
-for i in range(len(val_dataset)):
-    _ = val_dataset[i]
+# for i in range(len(train_dataset)):
+#     _ = train_dataset[i]
+# for i in range(len(val_dataset)):
+#     _ = val_dataset[i]
 
 # %%
 # 1. build datasets / loaders using config
@@ -173,6 +176,42 @@ trainer.plot_history()
 trainer.save_curves_and_config(output_dir=output_dir)
 
 # %%
+import csv
+
+new_row = {
+
+    "timestamp": timestamp,
+    "name": config["dataset"]["name"],
+    "num_classes": config["dataset"]["num_classes"],
+    "num_points": config["dataset"]["num_points"],
+    "pillar_size": config["voxelizer"]["pillar_size"],
+    "max_pillars": config["voxelizer"]["max_pillars"],
+    "max_points_per_pillar": config["voxelizer"]["max_points_per_pillar"],
+    "pfn_out_dim": config["pfn"]["out_dim"],
+    "bb_base_channels": config["backbone"]["base_channels"],
+    "bb_fc1_dim": config["backbone"]["fc1_dim"],
+    "bb_dropout_p": config["backbone"]["dropout_p"],
+    "batch_size": config["train"]["batch_size"],
+    "lr": config["train"]["lr"],
+    "weight_decay": config["train"]["weight_decay"],
+    "num_epochs": config["train"]["num_epochs"],
+    "min_train_loss": min(trainer.history["train_loss"]),
+    "min_val_loss": min(trainer.history["val_loss"]),
+    "max_train_acc": max(trainer.history["train_acc"]),
+    "max_val_acc": max(trainer.history["val_acc"])
+}
+
+csv_path = "config_log.csv"
+
+# Append mode
+with open(csv_path, "a", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=new_row.keys())
+
+    # Write header only if file is empty
+    if f.tell() == 0:
+        writer.writeheader()
+
+    writer.writerow(new_row)
 
 
 # %%

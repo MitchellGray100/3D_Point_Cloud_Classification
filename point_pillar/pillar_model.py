@@ -53,7 +53,8 @@ class PointPillarsClassifier(nn.Module):
             in_channels=pfn_cfg["out_dim"],
             num_classes=num_classes,
             base_channels=bb_cfg["base_channels"],
-            fc1_dim=bb_cfg["fc1_dim"]
+            fc1_dim=bb_cfg["fc1_dim"],
+            dropout_p=bb_cfg["dropout_p"]
         )
 
         self.to(device)

@@ -22,7 +22,7 @@ class SimplePillarBackbone(nn.Module):
     Output:
         logits: (B, num_classes)
     """
-    def __init__(self, in_channels: int, num_classes: int, base_channels: int = 32, fc1_dim: int = 256):
+    def __init__(self, in_channels: int, num_classes: int, base_channels: int = 32, fc1_dim: int = 256, dropout_p: float = 0.0):
         super().__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -42,6 +42,8 @@ class SimplePillarBackbone(nn.Module):
         # Global average pooling → (B, C_base*4) -> (B, num_classes)
         self.fc1   = nn.Linear(base_channels * 4, fc1_dim)
         self.fc2   = nn.Linear(fc1_dim, num_classes)
+
+        self.dropout = nn.Dropout(p=dropout_p)
 
     def forward(self, x):
         """
@@ -64,6 +66,7 @@ class SimplePillarBackbone(nn.Module):
 
         # Classifier MLP
         x = F.relu(self.fc1(x))                                                                                 # (B, Hidden)
+        x = self.dropout(x)
         logits = self.fc2(x)                                                                                    # (B, num_classes)
 
         return logits
