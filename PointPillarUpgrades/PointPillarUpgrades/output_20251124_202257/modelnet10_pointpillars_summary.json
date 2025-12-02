@@ -1,0 +1,66 @@
+{
+  "config": {
+    "dataset": {
+      "name": "ModelNet10",
+      "num_classes": 10,
+      "num_points": 10
+    },
+    "voxelizer": {
+      "x_range": [
+        -1.0,
+        1.0
+      ],
+      "y_range": [
+        -1.0,
+        1.0
+      ],
+      "z_range": [
+        -1.0,
+        1.0
+      ],
+      "pillar_size": [
+        0.08,
+        0.08
+      ],
+      "max_pillars": 1024,
+      "max_points_per_pillar": 32
+    },
+    "pfn": {
+      "in_dim": 8,
+      "out_dim": 64
+    },
+    "backbone": {
+      "base_channels": 32,
+      "fc1_dim": 256,
+      "dropout_p": 0.0
+    },
+    "train": {
+      "batch_size": 4,
+      "lr": 0.001,
+      "weight_decay": 0.0001,
+      "num_epochs": 1
+    }
+  },
+  "history": {
+    "epochs": [
+      1
+    ],
+    "train_loss": [
+      1.5683338064144978
+    ],
+    "val_loss": [
+      1.542201702060416
+    ],
+    "train_acc": [
+      0.4607867702330243
+    ],
+    "val_acc": [
+      0.3931718061674009
+    ]
+  },
+  "artifacts": {
+    "loss_figure": "output_20251124_202257\\modelnet10_pointpillars_loss.png",
+    "acc_figure": "output_20251124_202257\\modelnet10_pointpillars_acc.png",
+    "history_csv": "output_20251124_202257\\modelnet10_pointpillars_history.csv"
+  }
+}
