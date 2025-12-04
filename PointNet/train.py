@@ -173,11 +173,6 @@ def train_one_epoch(
     device,
     regularization_loss_weight=0.001,
     global_step_count=0,
-    batch_size=32,
-    batch_norm_init_decay=0.5,
-    batch_norm_decay_rate=0.5,
-    batch_norm_decay_step=200000,
-    batch_norm_decay_clip=0.99,
     grad_clip=1.0,
     label_smoothing=0.1,
 ):
@@ -481,4 +476,4 @@ def train(
 
 
 if __name__ == "__main__":
-    train(model_name="ModelNet10")
+    train(model_name="ModelNet40")
