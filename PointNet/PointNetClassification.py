@@ -10,6 +10,7 @@ class PointNetClassification(nn.Module):
 
         self.feature_extraction = PointNet()
 
+        # Improved classification head with better regularization
         self.fully_connected_layer_1 = nn.Linear(1024, 512)
         self.fully_connected_layer_2 = nn.Linear(512, 256)
         self.fully_connected_layer_3 = nn.Linear(256, num_classes)
@@ -18,7 +19,7 @@ class PointNetClassification(nn.Module):
         self.batch_norm_2 = nn.BatchNorm1d(256)
 
         self.relu = nn.ReLU()
-        self.dropout_layer = nn.Dropout(p=dropout_probability)
+        self.dropout = nn.Dropout(p=dropout_probability)
 
     def forward(self, x):
         # (batch_size, 3, num_points)
@@ -28,12 +29,13 @@ class PointNetClassification(nn.Module):
         x = self.fully_connected_layer_1(x)
         x = self.batch_norm_1(x)
         x = self.relu(x)
+        x = self.dropout(x)
 
         # fc 512 to 256
         x = self.fully_connected_layer_2(x)
         x = self.batch_norm_2(x)
         x = self.relu(x)
-        x = self.dropout_layer(x)
+        x = self.dropout(x)
 
         # fc 256 to num_classes logits
         x = self.fully_connected_layer_3(x)

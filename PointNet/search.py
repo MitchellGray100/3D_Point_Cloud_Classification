@@ -33,19 +33,19 @@ csv_field_names = [
 default_param_grid = {
     "model_name": ["ModelNet10"],
     "batch_size": [32],
-    "num_epochs": [200], # 250
+    "num_epochs": [250], # 250
     "learning_rate": [0.001],
-    "learning_rate_decay_step": [80000],
+    "learning_rate_decay_step": [100000],
     "learning_rate_decay_factor": [0.7],
-    "min_learning_rate": [0],
+    "min_learning_rate": [0.00001],
     "regularization_loss_weight": [0.001],
-    "dropout_prob": [0.4],
-    "adam_weight_decay": [0.0],
+    "dropout_prob": [0.3],
+    "adam_weight_decay": [0.0001], # 0
     "augment_training_data": [True],
     "num_points": [1024],
-    "batch_norm_init_decay": [0.5],
+    "batch_norm_init_decay": [0.5], # 0.5
     "batch_norm_decay_rate": [0.5],
-    "batch_norm_decay_step": [8000],
+    "batch_norm_decay_step": [200000],
     "batch_norm_decay_clip": [0.99],
 }
 

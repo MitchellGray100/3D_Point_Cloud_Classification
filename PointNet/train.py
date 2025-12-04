@@ -8,12 +8,11 @@ import torch.nn.functional as F
 
 from loss import t_net_regularization_loss
 from PointNetClassification import PointNetClassification
-import augment_train_data
 
 from torch_geometric.datasets import ModelNet
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import SamplePoints
-from torch_geometric.transforms import Compose
+import torch_geometric.transforms as T
 from torch_geometric.utils import to_dense_batch
 
 import os
@@ -22,7 +21,7 @@ import traceback
 
 # detect colab
 import sys
-is_colab = 'google.colab' in sys.modules
+is_colab = "google.colab" in sys.modules
 
 
 def plot_curves(
@@ -140,11 +139,11 @@ def log_result(
 def get_batch(batch, device):
     # to_dense_batch returns (batch_size, num_nodes, features) and a mask
     # batch.batch is the index vector [0, 0, ... 1, 1, ...]
-    points, mask = to_dense_batch(batch.pos, batch = batch.batch)
-    
+    points, mask = to_dense_batch(batch.pos, batch=batch.batch)
+
     # Transpose to (Batch, 3, Num_points) for PointNet
     points = points.transpose(2, 1)
-    
+
     points_on_device = points.to(device)
     labels_on_device = batch.y.to(device)
     return points_on_device, labels_on_device
@@ -166,39 +165,11 @@ def get_batch_norm_momentum(
     return new_momentum
 
 
-def get_learning_rate(
-    step_index,
-    batch_size,
-    base_learning_rate,
-    decay_rate,
-    decay_step,
-    min_learning_rate,
-):
-    total_samples_processed = step_index * batch_size
-    num_decay_steps = total_samples_processed // decay_step
-    new_learning_rate = base_learning_rate * (decay_rate**num_decay_steps)
-    if new_learning_rate < min_learning_rate:
-        new_learning_rate = min_learning_rate
-    else:
-        new_learning_rate = new_learning_rate
-    return new_learning_rate
-
-
-def normalize_unit_sphere(data):
-    pos = data.pos
-    point_centroid = pos.mean(dim=0, keepdim=True)
-    pos = pos - point_centroid
-    distances_from_origin = torch.sqrt((pos**2).sum(dim=1))
-    max_distance_from_origin = distances_from_origin.max()
-    normalized_pos = pos / max_distance_from_origin
-    data.pos = normalized_pos
-    return data
-
-
 def train_one_epoch(
     model,
     loader,
     optimizer,
+    scheduler,
     device,
     regularization_loss_weight=0.001,
     global_step_count=0,
@@ -207,10 +178,8 @@ def train_one_epoch(
     batch_norm_decay_rate=0.5,
     batch_norm_decay_step=200000,
     batch_norm_decay_clip=0.99,
-    base_learning_rate=0.001,
-    learning_rate_decay_rate=0.7,
-    learning_rate_decay_step=200000,
-    learning_rate_min=0.0,
+    grad_clip=1.0,
+    label_smoothing=0.1,
 ):
     model.train()
     total_loss = 0
@@ -231,16 +200,6 @@ def train_one_epoch(
         for module in model.modules():
             if isinstance(module, nn.BatchNorm1d):
                 module.momentum = batch_norm_momentum
-        learning_rate = get_learning_rate(
-            step_index,
-            batch_size,
-            base_learning_rate=base_learning_rate,
-            decay_rate=learning_rate_decay_rate,
-            decay_step=learning_rate_decay_step,
-            min_learning_rate=learning_rate_min,
-        )
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = learning_rate
 
         # clear
         optimizer.zero_grad()
@@ -251,8 +210,7 @@ def train_one_epoch(
         # forward
         logits, trans_feat = model(points)
 
-        # classification loss
-        loss = F.cross_entropy(logits, labels)
+        loss = F.cross_entropy(logits, labels, label_smoothing=label_smoothing)
 
         # Regularization loss for feature transform
         regularization_loss = t_net_regularization_loss(trans_feat)
@@ -260,7 +218,13 @@ def train_one_epoch(
 
         # backward
         loss.backward()
+
+        # Gradient clipping for training stability
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
         optimizer.step()
+        scheduler.step()
 
         # loss
         total_loss += loss.item()
@@ -269,10 +233,12 @@ def train_one_epoch(
         correct_pred_num += count_correct(pred, labels)
         total_samples_num += labels.size(0)
 
+        current_lr = optimizer.param_groups[0]["lr"]
         pbar.set_postfix(
             {
                 "loss": loss.item(),
                 "accuracy": (correct_pred_num / total_samples_num) * 100,
+                "lr": current_lr,
             }
         )
 
@@ -284,7 +250,7 @@ def train_one_epoch(
     return average_loss, average_accuracy, step_index
 
 
-def evaluate_one_epoch(model, loader, device):
+def evaluate_one_epoch(model, loader, device, label_smoothing=0.0):
     model.eval()
 
     correct_pred_num = 0
@@ -301,7 +267,7 @@ def evaluate_one_epoch(model, loader, device):
             correct_pred_num += count_correct(pred, labels)
             total_samples_num += labels.size(0)
 
-            loss = F.cross_entropy(logits, labels)
+            loss = F.cross_entropy(logits, labels, label_smoothing=label_smoothing)
             total_loss += loss.item()
 
     average_loss = total_loss / len(loader)
@@ -314,18 +280,18 @@ def train(
     batch_size=32,
     num_epochs=250,  # 250
     learning_rate=0.001,  # 0.01, 0.001
-    learning_rate_decay_step=200000,
-    learning_rate_decay_factor=0.7,
-    min_learning_rate=1e-5,
+    min_learning_rate=1e-6,
     regularization_loss_weight=0.001,
     dropout_prob=0.3,
-    adam_weight_decay=0,  # 0, 1e-4
+    adam_weight_decay=1e-4,  # 0, 1e-4
     augment_training_data=True,
     num_points=1024,  # sample points from 3d models
     batch_norm_init_decay=0.5,
     batch_norm_decay_rate=0.5,
     batch_norm_decay_step=200000,
     batch_norm_decay_clip=0.99,
+    label_smoothing=0.1,
+    grad_clip=1.0,
 ):
     model_path = None
     number_of_classes = 0
@@ -344,8 +310,7 @@ def train(
 
     config_name = (
         f"{model_name}_bs{batch_size}_ep{num_epochs}"
-        f"_lr{learning_rate}_schedS{learning_rate_decay_step}"
-        f"_schedD{learning_rate_decay_factor}"
+        f"_lr{learning_rate}_minlr{min_learning_rate}"
         f"_reg{regularization_loss_weight}_drop{dropout_prob}"
         f"_wd{adam_weight_decay}"
         f"_aug{int(augment_training_data)}_pts{num_points}"
@@ -370,18 +335,19 @@ def train(
     print(f"Using device: {device}")
 
     if augment_training_data:
-        train_transform = Compose(
+        train_transform = T.Compose(
             [
                 SamplePoints(num_points),
-                normalize_unit_sphere,
-                augment_train_data.apply_random_y_rotation,
-                augment_train_data.apply_random_jitter,
+                T.RandomRotate(15, axis='y'),
+                T.RandomScale((0.8, 1.2)),
+                T.RandomJitter(translate=0.01),
+                T.NormalizeScale(),
             ]
         )
     else:
-        train_transform = Compose([SamplePoints(num_points), normalize_unit_sphere])
+        train_transform = T.Compose([SamplePoints(num_points), T.NormalizeScale()])
 
-    test_transform = Compose([SamplePoints(num_points), normalize_unit_sphere])
+    test_transform = T.Compose([SamplePoints(num_points), T.NormalizeScale()])
     print("Creating dataset.")
     try:
         train_dataset = ModelNet(
@@ -409,11 +375,12 @@ def train(
     print("Loading data.")
     try:
         num_workers = 4
+        pin_memory = torch.cuda.is_available()
         train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory
         )
         test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+            test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory
         )
     except Exception as e:
         print(f"Error creating dataloaders: {e}")
@@ -424,13 +391,21 @@ def train(
 
     # PointNetClassification
     model = PointNetClassification(
-        num_classes=number_of_classes, dropout_probability=dropout_prob
+        num_classes=number_of_classes,
+        dropout_probability=dropout_prob,
     )
     model = model.to(device)
 
-    # optimizer with adam
+    # optimizer with adam and weight decay
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=adam_weight_decay
+    )
+
+    # Create CosineAnnealingLR scheduler
+    steps_per_epoch = len(train_loader)
+    total_steps = steps_per_epoch * num_epochs
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=total_steps, eta_min=min_learning_rate
     )
 
     # training loop
@@ -449,6 +424,7 @@ def train(
             model,
             train_loader,
             optimizer,
+            scheduler,
             device,
             regularization_loss_weight,
             global_step_count=global_step_count,
@@ -457,14 +433,12 @@ def train(
             batch_norm_decay_rate=batch_norm_decay_rate,
             batch_norm_decay_step=batch_norm_decay_step,
             batch_norm_decay_clip=batch_norm_decay_clip,
-            base_learning_rate=learning_rate,
-            learning_rate_decay_rate=learning_rate_decay_factor,
-            learning_rate_decay_step=learning_rate_decay_step,
-            learning_rate_min=min_learning_rate,
+            grad_clip=grad_clip,
+            label_smoothing=label_smoothing,
         )
 
-        # evaluate
-        test_loss, test_accuracy = evaluate_one_epoch(model, test_loader, device)
+        # evaluate (no label smoothing for evaluation)
+        test_loss, test_accuracy = evaluate_one_epoch(model, test_loader, device, label_smoothing=0.0)
         if test_accuracy > best_test_accuracy:
             best_test_accuracy = test_accuracy
 
@@ -489,8 +463,8 @@ def train(
         batch_size=batch_size,
         num_epochs=num_epochs,
         learning_rate=learning_rate,
-        learning_rate_step_size=learning_rate_decay_step,
-        learning_rate_decay_factor=learning_rate_decay_factor,
+        learning_rate_step_size=total_steps,  # T_max for CosineAnnealingLR
+        learning_rate_decay_factor=0.0,  # Not applicable for CosineAnnealingLR
         min_learning_rate=min_learning_rate,
         regularization_loss_weight=regularization_loss_weight,
         dropout_prob=dropout_prob,
@@ -506,4 +480,4 @@ def train(
 
 
 if __name__ == "__main__":
-    train(model_name="ModelNet40")
+    train(model_name="ModelNet10")
